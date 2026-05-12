@@ -196,6 +196,12 @@ class Store:
                 (document_id, text),
             )
 
+    def recorded_downloads(self) -> list[tuple[str, str]]:
+        cur = self._conn.execute(
+            "SELECT id, path FROM documents WHERE path IS NOT NULL"
+        )
+        return [(row[0], row[1]) for row in cur.fetchall()]
+
     def documents_missing_download(self) -> list[tuple[str, str, str]]:
         cur = self._conn.execute(
             "SELECT id, meeting_id, url FROM documents WHERE path IS NULL"

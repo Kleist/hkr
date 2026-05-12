@@ -73,6 +73,7 @@ def scrape(
                 logger.info("[%d/%d] %s %s %s", i, len(scheduled), m.meeting_date, m.kind, m.title)
                 _fetch_agenda(client, store, m.id, m.committee_id)
             if not skip_pdfs:
+                _validate_existing_downloads(store)
                 _download_pdfs(client, store, pdf_root)
             if not skip_text:
                 _extract_texts(store)
@@ -119,6 +120,24 @@ def _fetch_agenda(client: HttpClient, store: Store, meeting_id: str, committee_i
     store.mark_agenda_fetched(meeting_id)
 
 
+def _validate_existing_downloads(store: Store) -> None:
+    """Drop on-disk files that aren't real PDFs and clear their download record.
+
+    Earlier versions of the scraper recorded auth-challenge HTML pages as if
+    they were PDFs. This pass cleans those up so the subsequent download stage
+    can retry them in the same run.
+    """
+    bad = 0
+    for doc_id, path in store.recorded_downloads():
+        pdf_path = Path(path)
+        if not pdfmod.is_pdf(pdf_path):
+            pdf_path.unlink(missing_ok=True)
+            store.clear_download(doc_id)
+            bad += 1
+    if bad:
+        typer.echo(f"Discarded {bad} non-PDF file(s) from previous runs.")
+
+
 def _download_pdfs(client: HttpClient, store: Store, pdf_root: Path) -> None:
     pending = store.documents_missing_download()
     typer.echo(f"Downloading {len(pending)} PDFs...")
@@ -146,14 +165,6 @@ def _extract_texts(store: Store) -> None:
     typer.echo(f"Extracting text from {len(pending)} PDFs...")
     for doc_id, path in pending:
         pdf_path = Path(path)
-        if not pdfmod.is_pdf(pdf_path):
-            # A previous download recorded a non-PDF body (e.g. an auth-challenge
-            # HTML page). Drop the file and the download record so the next
-            # scrape can retry.
-            logger.warning("dropping non-PDF file recorded for %s: %s", doc_id, pdf_path)
-            pdf_path.unlink(missing_ok=True)
-            store.clear_download(doc_id)
-            continue
         try:
             text = pdfmod.extract_text(pdf_path)
         except Exception as exc:
