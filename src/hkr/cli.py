@@ -145,8 +145,17 @@ def _extract_texts(store: Store) -> None:
     pending = store.documents_missing_text()
     typer.echo(f"Extracting text from {len(pending)} PDFs...")
     for doc_id, path in pending:
+        pdf_path = Path(path)
+        if not pdfmod.is_pdf(pdf_path):
+            # A previous download recorded a non-PDF body (e.g. an auth-challenge
+            # HTML page). Drop the file and the download record so the next
+            # scrape can retry.
+            logger.warning("dropping non-PDF file recorded for %s: %s", doc_id, pdf_path)
+            pdf_path.unlink(missing_ok=True)
+            store.clear_download(doc_id)
+            continue
         try:
-            text = pdfmod.extract_text(Path(path))
+            text = pdfmod.extract_text(pdf_path)
         except Exception as exc:
             logger.warning("extract_text failed for %s: %s", doc_id, exc)
             continue

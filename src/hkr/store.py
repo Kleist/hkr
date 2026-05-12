@@ -160,6 +160,13 @@ class Store:
                 (d.id, meeting_id, d.kind, d.title, d.url, d.item_no, d.item_title, d.order),
             )
 
+    def clear_download(self, document_id: str) -> None:
+        with self.tx() as conn:
+            conn.execute(
+                "UPDATE documents SET sha256 = NULL, path = NULL, bytes = NULL, downloaded_at = NULL WHERE id = ?",
+                (document_id,),
+            )
+
     def record_download(self, document_id: str, *, sha256: str, path: Path, size: int) -> None:
         with self.tx() as conn:
             conn.execute(

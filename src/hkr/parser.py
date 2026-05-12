@@ -148,6 +148,10 @@ def _documents_from_punkter(punkter: Iterable[dict]) -> Iterable[Document]:
             doc_id = b.get("Id")
             if not doc_id or doc_id == zero_guid:
                 continue
+            # HarPdfVersion is returned as the *string* "true"/"false". When
+            # "false" the bilag exists but has no PDF rendition, so we skip it.
+            if str(b.get("HarPdfVersion", "true")).lower() == "false":
+                continue
             yield Document(
                 id=doc_id,
                 kind="bilag",
