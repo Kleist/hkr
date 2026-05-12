@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.env
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# Raw API snapshots (kept locally for debugging; can be regenerated)
+data/raw/
+
+# OS noise
+.DS_Store
