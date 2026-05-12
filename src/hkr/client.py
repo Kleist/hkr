@@ -74,6 +74,19 @@ class HttpClient:
             self._snapshot(label, payload)
         return payload
 
+    @retry(
+        reraise=True,
+        stop=stop_after_attempt(5),
+        wait=wait_exponential(multiplier=1, min=1, max=30),
+        retry=retry_if_exception(_is_retryable),
+    )
+    def get_text(self, url: str) -> str:
+        self._throttle()
+        logger.info("GET %s", url)
+        response = self._client.get(url)
+        response.raise_for_status()
+        return response.text
+
     def stream_to(self, url: str, dest: Path) -> int:
         self._throttle()
         logger.info("GET (stream) %s", url)

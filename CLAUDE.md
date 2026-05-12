@@ -29,7 +29,7 @@ The scraper targets **FirstAgenda Publication** at `https://dagsordener-referate
 
 1. `GET /api/agenda/udvalgsliste` — every committee grouped by election period (`"Udvalg 2026-2029"`, `"Udvalg 2022-2025"`, ...) with all of that committee's meetings **inlined**. This is the discovery hub — one call, ~34 committees, ~1400 meetings.
 2. `GET /api/agenda/dagsorden/{meeting_id}` — one meeting's `Dagsordenpunkter` with two PDF sources per item: `Felter[]` (case-presentation fields, each with `DocumentId` + `Link`) and `Bilag[]` (attachments, each with `Id` + `Navn` + `Order`).
-3. `GET /Vis/Pdf/bilag/{document_id}` — streams `application/pdf`. Both `Felter[].DocumentId` and `Bilag[].Id` resolve here.
+3. `GET /Vis/Pdf/bilag/{document_id}` — returns an HTML "Dokumentvisning" wrapper, **not** the PDF binary. The wrapper's `<iframe src=...>` is a short-lived (~5 min) presigned `firstagenda-4.s3.eu-west-1.amazonaws.com` URL serving the real PDF. `pdf.download` resolves the iframe (via `pdf.resolve_pdf_url`) and immediately streams from S3. Both `Felter[].DocumentId` and `Bilag[].Id` resolve through this path.
 
 All entity IDs are **GUIDs (strings)**, not integers. `Moede.Id` inside an agenda payload is a zero-GUID and must be ignored — the real meeting id is the top-level `Id`. The zero-GUID `"00000000-0000-0000-0000-000000000000"` also appears as a placeholder in `Felter[].DocumentId` and must be skipped.
 
@@ -56,7 +56,7 @@ Each stage is idempotent and resumable: re-running `hkr scrape` is safe; per-sta
 - **`client.py`** — `HttpClient` wraps `httpx.Client` with tenacity retries on 5xx/transport errors, a token-bucket rate limiter (`rps`), and optional `save_raw_dir` snapshotting per call (`label` arg becomes the filename).
 - **`parser.py`** — pure JSON→dataclass mappers. `parse_udvalgsliste` returns `list[tuple[Committee, list[MeetingRef]]]`; `parse_agenda` returns a `ParsedAgenda`. Both raise `UnknownStructureError` on shape drift. Meeting `kind` is inferred from `Navn` (`"Referat"`/`"Lukket referat"` → `referat`, else → `dagsorden`).
 - **`store.py`** — SQLite layer. All IDs are `TEXT`. Tables: `committees`, `meetings`, `documents`, `doc_text`, plus a **standalone** FTS5 virtual table `doc_fts(document_id UNINDEXED, text)`. The FTS table is intentionally not `content='doc_text'` linked — TEXT primary keys don't align with the integer rowid that contentless FTS expects. Search joins via `doc_fts.document_id`.
-- **`pdf.py`** — streams downloads to a temp file, computes sha256, then moves to `data/pdfs/{committee_id}/{year}/{sha256[:2]}/{sha256}.pdf`. Content-addressing means PDFs referenced from multiple items dedupe automatically. `extract_text` uses pypdf and is page-fault-tolerant.
+- **`pdf.py`** — two-stage download: GET the `/Vis/Pdf/bilag/{id}` viewer HTML, extract the presigned S3 URL from its iframe, stream that to a temp file. After download, the magic bytes must be `%PDF-` (else `NotAPdfError`). Files are then sha256'd and moved to `data/pdfs/{committee_id}/{year}/{sha256[:2]}/{sha256}.pdf` — content-addressing means PDFs referenced from multiple items dedupe automatically. `extract_text` uses pypdf and is page-fault-tolerant.
 
 ### Testing
 

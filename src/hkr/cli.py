@@ -225,38 +225,5 @@ def db_path_cmd(db_path: Path = typer.Option(DEFAULT_DB, "--db")) -> None:
     typer.echo(str(db_path.resolve()))
 
 
-@app.command(name="probe-pdf")
-def probe_pdf(
-    document_id: str = typer.Argument(..., help="A document GUID seen in `documents` table."),
-    rps: float = typer.Option(1.0, "--rps"),
-) -> None:
-    """Diagnose what /Vis/Pdf/bilag/{id} actually returns (status, content-type, first 300 bytes)."""
-    import httpx
-
-    from hkr.sources import bilag_pdf_url
-
-    url = bilag_pdf_url(document_id)
-    with HttpClient(rps=rps) as client:
-        # Bootstrap the session cookie via a known-working API call first.
-        client.get_json(sources.udvalgsliste_url(), label=None)
-        # Now probe the PDF URL using the underlying httpx client directly so we
-        # can see redirect history and headers without saving anything.
-        resp = client._client.get(url)  # noqa: SLF001
-    typer.echo(f"Final status: {resp.status_code}")
-    typer.echo(f"Final URL:    {resp.url}")
-    typer.echo(f"Content-Type: {resp.headers.get('content-type')}")
-    typer.echo(f"Content-Length: {resp.headers.get('content-length')}")
-    typer.echo("Redirect chain:")
-    for h in resp.history:
-        typer.echo(f"  {h.status_code} {h.url} -> {h.headers.get('location')}")
-    body = resp.content
-    typer.echo(f"\nFirst 5 bytes: {body[:5]!r}  (PDF would be b'%PDF-')")
-    out = Path(f"probe-pdf-{document_id}.body")
-    out.write_bytes(body)
-    typer.echo(f"Wrote full body ({len(body)} bytes) to {out}")
-    typer.echo("Full body:")
-    typer.echo(body.decode("utf-8", errors="replace"))
-
-
 if __name__ == "__main__":
     app()

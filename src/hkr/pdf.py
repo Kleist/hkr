@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import hashlib
+import html
 import logging
+import re
 import shutil
 import tempfile
 from pathlib import Path
@@ -14,9 +16,13 @@ logger = logging.getLogger(__name__)
 
 PDF_MAGIC = b"%PDF-"
 
+# The /Vis/Pdf/bilag/{id} endpoint returns an HTML "Dokumentvisning" page whose
+# iframe src is a short-lived (~5 min) presigned S3 URL serving the real PDF.
+_IFRAME_SRC_RE = re.compile(r'<iframe[^>]*\bsrc="([^"]+)"', re.IGNORECASE)
+
 
 class NotAPdfError(ValueError):
-    """The downloaded body is not a PDF (e.g. an auth-challenge HTML page)."""
+    """Downloaded body is not a PDF, or the viewer wrapper didn't expose one."""
 
 
 def is_pdf(path: Path) -> bool:
@@ -27,27 +33,41 @@ def is_pdf(path: Path) -> bool:
         return False
 
 
+def resolve_pdf_url(viewer_html: str) -> str:
+    """Extract the presigned PDF URL from a FirstAgenda viewer HTML page."""
+    match = _IFRAME_SRC_RE.search(viewer_html)
+    if not match:
+        raise NotAPdfError("no <iframe src> in viewer HTML")
+    return html.unescape(match.group(1))
+
+
 def content_addressed_path(root: Path, committee_id: str, year: int, sha256: str) -> Path:
     return root / committee_id / str(year) / sha256[:2] / f"{sha256}.pdf"
 
 
 def download(
     client: HttpClient,
-    url: str,
+    viewer_url: str,
     *,
     pdf_root: Path,
     committee_id: str,
     year: int,
 ) -> tuple[Path, str, int]:
+    """Resolve the FirstAgenda viewer wrapper to its real PDF URL, then download.
+
+    ``viewer_url`` is ``/Vis/Pdf/bilag/{document_id}``. That endpoint returns
+    an HTML page; the binary lives in a presigned S3 URL inside its iframe.
+    The presigned URL is valid for ~5 minutes so we resolve and download
+    in immediate succession.
+    """
+    viewer_html = client.get_text(viewer_url)
+    pdf_url = resolve_pdf_url(viewer_html)
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
         tmp_path = Path(tmp.name)
     try:
-        bytes_written = client.stream_to(url, tmp_path)
+        bytes_written = client.stream_to(pdf_url, tmp_path)
         if not is_pdf(tmp_path):
-            # /Vis/Pdf/bilag/{id} sometimes returns 200 OK with an HTML body
-            # (e.g. the anonymous-auth challenge page) for bilag without a PDF
-            # version. Don't record this as a successful download.
-            raise NotAPdfError(f"response from {url} is not a PDF")
+            raise NotAPdfError(f"response from {pdf_url} is not a PDF")
         sha256 = _sha256_file(tmp_path)
         final = content_addressed_path(pdf_root, committee_id, year, sha256)
         if not final.exists():
@@ -80,3 +100,4 @@ def _sha256_file(path: Path) -> str:
         for chunk in iter(lambda: fh.read(65536), b""):
             h.update(chunk)
     return h.hexdigest()
+
