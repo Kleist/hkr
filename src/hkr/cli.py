@@ -251,8 +251,11 @@ def probe_pdf(
         typer.echo(f"  {h.status_code} {h.url} -> {h.headers.get('location')}")
     body = resp.content
     typer.echo(f"\nFirst 5 bytes: {body[:5]!r}  (PDF would be b'%PDF-')")
-    typer.echo("First 300 bytes:")
-    typer.echo(body[:300].decode("utf-8", errors="replace"))
+    out = Path(f"probe-pdf-{document_id}.body")
+    out.write_bytes(body)
+    typer.echo(f"Wrote full body ({len(body)} bytes) to {out}")
+    typer.echo("Full body:")
+    typer.echo(body.decode("utf-8", errors="replace"))
 
 
 if __name__ == "__main__":
