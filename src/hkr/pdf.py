@@ -13,8 +13,8 @@ from hkr.client import HttpClient
 logger = logging.getLogger(__name__)
 
 
-def content_addressed_path(root: Path, committee_id: int, year: int, sha256: str) -> Path:
-    return root / str(committee_id) / str(year) / sha256[:2] / f"{sha256}.pdf"
+def content_addressed_path(root: Path, committee_id: str, year: int, sha256: str) -> Path:
+    return root / committee_id / str(year) / sha256[:2] / f"{sha256}.pdf"
 
 
 def download(
@@ -22,7 +22,7 @@ def download(
     url: str,
     *,
     pdf_root: Path,
-    committee_id: int,
+    committee_id: str,
     year: int,
 ) -> tuple[Path, str, int]:
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
@@ -48,7 +48,7 @@ def extract_text(pdf_path: Path) -> str:
     for page in reader.pages:
         try:
             parts.append(page.extract_text() or "")
-        except Exception as exc:  # pypdf occasionally chokes on a single page
+        except Exception as exc:
             logger.warning("extract_text failed for one page of %s: %s", pdf_path, exc)
     return "\n".join(parts).strip()
 

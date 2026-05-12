@@ -1,36 +1,31 @@
 """URL builders for the FirstAgenda Publication backend used by
 https://dagsordener-referater.hvidovre.dk/.
 
-The concrete endpoint paths are filled in once DevTools captures land in
-``docs/api-capture.md``. Until then, the constants below are placeholders and
-the builders raise ``NotImplementedError`` so callers fail fast.
+Discovered from the captured HAR (see docs/api-capture.md). Three endpoints
+are enough to crawl the whole dataset:
+
+- ``GET /api/agenda/udvalgsliste`` returns every committee, grouped by election
+  period, with all of that committee's meetings inlined.
+- ``GET /api/agenda/dagsorden/{meeting_id}`` returns one meeting's agenda items
+  ("Dagsordenpunkter") with attachments ("Bilag") and case-presentation fields
+  ("Felter") that link to the PDF storage.
+- ``GET /Vis/Pdf/bilag/{document_id}`` serves the PDF for any document GUID
+  (used for both "Felter[].DocumentId" case presentations and "Bilag[].Id"
+  attachments).
 """
 
 from __future__ import annotations
 
-# TODO(api-capture): replace with the actual host/base path seen in DevTools.
-# Likely something like https://publication.firstagenda.com/api/...
-BASE_URL: str | None = None
+BASE_URL = "https://dagsordener-referater.hvidovre.dk"
 
 
-def _require_base() -> str:
-    if BASE_URL is None:
-        raise NotImplementedError(
-            "FirstAgenda Publication base URL not configured yet. "
-            "Capture the XHR/fetch traffic from "
-            "https://dagsordener-referater.hvidovre.dk/ and populate "
-            "hkr.sources.BASE_URL (see docs/api-capture.md)."
-        )
-    return BASE_URL
+def udvalgsliste_url() -> str:
+    return f"{BASE_URL}/api/agenda/udvalgsliste"
 
 
-def committees_url() -> str:
-    return f"{_require_base()}/committees"
+def agenda_url(meeting_id: str) -> str:
+    return f"{BASE_URL}/api/agenda/dagsorden/{meeting_id}"
 
 
-def meetings_url(committee_id: int) -> str:
-    return f"{_require_base()}/committees/{committee_id}/meetings"
-
-
-def agenda_url(agenda_id: int) -> str:
-    return f"{_require_base()}/meetings/{agenda_id}"
+def bilag_pdf_url(document_id: str) -> str:
+    return f"{BASE_URL}/Vis/Pdf/bilag/{document_id}"

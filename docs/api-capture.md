@@ -1,82 +1,107 @@
-# FirstAgenda Publication — API capture
+# FirstAgenda Publication — API reference (Hvidovre)
 
 The SPA at <https://dagsordener-referater.hvidovre.dk/> is "Powered by
-FirstAgenda Publication" and loads its data via XHR/fetch calls to a JSON
-backend. We target that backend directly. This file is where the captured
-requests live so the scraper can be wired up.
+FirstAgenda Publication" and loads data via XHR to a JSON backend on the same
+host. The endpoints were captured to `docs/har-capture.json`; representative
+response bodies are committed under `tests/fixtures/json/`.
 
-## How to capture
+Three endpoints are enough to crawl the whole dataset:
 
-1. Open <https://dagsordener-referater.hvidovre.dk/> in Chrome/Firefox.
-2. Open DevTools → **Network** tab → filter **Fetch/XHR** → check
-   **Preserve log**.
-3. Reload the page, then click through:
-   - the committee list / sidebar
-   - a recent meeting (open the agenda)
-   - one of the PDF links inside an agenda
-4. For each interesting request (skip fonts, analytics, etc.), right-click →
-   **Copy → Copy as cURL** *and* **Copy response**.
-5. Paste below under the matching section. Redact any auth tokens or session
-   cookies you don't want committed (the API is public, so there shouldn't
-   be any, but check).
-6. Save a representative response body for each endpoint to
-   `tests/fixtures/json/<name>.json` (e.g. `committees.json`,
-   `meetings_88.json`, `agenda_2877.json`).
+| Endpoint | Purpose |
+| --- | --- |
+| `GET /api/agenda/udvalgsliste` | Every committee, grouped by election period, with all meetings inlined |
+| `GET /api/agenda/dagsorden/{meeting_id}` | One meeting's agenda items, fields, and PDF attachments |
+| `GET /Vis/Pdf/bilag/{document_id}` | PDF stream for any document GUID |
 
-## Endpoints
+No authentication is required for public material. A `.AspNet.Cookies` session
+cookie is observed in the browser but the API responds to anonymous requests as
+well — the cookie is set on first visit and is not enforced.
 
-### 1. List of committees / publication root
+## 1. `GET /api/agenda/udvalgsliste`
 
-- **Request URL:** `TODO`
-- **Method:** `GET`
-- **Required headers (if any):** `TODO`
-- **Sample response file:** `tests/fixtures/json/committees.json`
+Response shape:
 
-```
-# paste curl here
-```
-
-### 2. Meetings for a committee
-
-- **Request URL:** `TODO` (parameterised by committee id)
-- **Method:** `GET`
-- **Sample response file:** `tests/fixtures/json/meetings_<committee_id>.json`
-
-```
-# paste curl here
-```
-
-### 3. Single meeting / agenda (with item list and attachments)
-
-- **Request URL:** `TODO` (parameterised by meeting/agenda id)
-- **Method:** `GET`
-- **Sample response file:** `tests/fixtures/json/agenda_<agenda_id>.json`
-
-```
-# paste curl here
+```json
+{
+  "Udvalg": {
+    "Udvalg 2026-2029": [
+      {
+        "Id": "ac4bbfca-65b5-4a1a-9ff3-0e9717ed6adf",
+        "Navn": "By- og Planudvalget",
+        "OrganisationId": "00000000-0000-0000-0000-000000000000",
+        "Historisk": false,
+        "Moeder": [
+          {
+            "Id": "fd2d6261-1220-429e-9ed0-46db433c496c",
+            "Dato": "2026-05-04T14:00:00+02:00",
+            "MeetingBeginUtc": "2026-05-04T14:00:00+02:00",
+            "ReleasedDate": "2026-05-06T10:53:07+02:00",
+            "Sted": "Sollentuna II",
+            "Afsluttet": true,
+            "Navn": "Referat",
+            "IsSupplementaryAgenda": false
+          }
+        ]
+      }
+    ],
+    "Udvalg 2022-2025": [ ... ],
+    "Udvalg 2018-2021": [ ... ],
+    "Udvalg 2014-2017": [ ... ],
+    "Folkeoplysningsudvalget 2014 og frem": [ ... ]
+  }
+}
 ```
 
-### 4. PDF attachment download
+Observed scale: ~5 periods, ~8 committees each, ~50 meetings each → ~1400 meetings total.
 
-- **URL pattern:** `TODO` (note: may be a FirstAgenda CDN host, e.g.
-  `*.firstagenda.com` or similar — record it as seen)
-- **Auth required:** yes / no
-- **Example URL:** `TODO`
+Meeting `Navn` values observed: `Referat`, `Dagsorden`, `Tillægsdagsorden`,
+`Lukket referat`, `Referat 1. behandling budget`. Lukkede møder are filtered
+server-side; what reaches the API is public.
+
+## 2. `GET /api/agenda/dagsorden/{meeting_id}`
+
+`meeting_id` is the GUID from `Moeder[].Id` above. Top-level response keys:
 
 ```
-# paste curl here
+Id                       - mirrors meeting_id
+Udvalg{Id, Navn, ...}    - parent committee
+Moede{Dato, Sted, Navn, Moededeltagere, ...}   (Moede.Id is the zero GUID — ignore it)
+TillaegsDagsorden        - bool
+Dagsordenpunkter[]       - the agenda items
+LiveIntegrationEnabled
+Lydfiler                 - audio files (rare; not handled yet)
 ```
 
-## Notes
+Each `Dagsordenpunkter` entry:
 
-- FirstAgenda's documented API exposes only public/released material —
-  closed committees and closed meetings are filtered server-side, which is
-  what we want.
-- If the API uses an `Authorization` or `X-Api-Key` header that you'd rather
-  not commit, set it via the `HKR_API_KEY` env var; the scraper will read
-  that and pass it through `HttpClient(extra_headers=...)`.
-- Once these four sections are filled in, the next steps are:
-  1. Set `BASE_URL` in `src/hkr/sources.py` and adjust the path builders.
-  2. Drop sample bodies into `tests/fixtures/json/`.
-  3. Implement `parse_committees`, `parse_meeting_list`, `parse_agenda` in
-     `src/hkr/parser.py`, test-first against the fixtures.
+```
+Id                 - item GUID
+Number/Punktnummer - "1", "2", ...
+Navn/Caption       - item title
+SagsNummer         - "25/26257"
+IsOpen             - bool
+Felter[]           - case-presentation pieces, each with Link + DocumentId (a PDF)
+Bilag[]            - attachments, each {Id, Navn, Order, HarPdfVersion}
+Presentations, ItemDecision, Lydfiler, Ressourcer  (often null)
+```
+
+Both `Felter[].DocumentId` and `Bilag[].Id` are document GUIDs that resolve via
+`/Vis/Pdf/bilag/{guid}`. `Felter[].Link` already contains that URL; for `Bilag`
+we build it. We skip the zero GUID (placeholder for empty fields).
+
+## 3. `GET /Vis/Pdf/bilag/{document_id}`
+
+Streams `application/pdf`. We content-address downloads by sha256, so identical
+PDFs referenced from multiple items dedupe to one file on disk.
+
+## Search endpoint (not used)
+
+`GET /api/agenda/soeg/?request.kriterie.udvalgId=...&request.kriterie.moedeDato=YYYY&request.paging...`
+exists but is unnecessary: `udvalgsliste` already returns every meeting we need
+for discovery, and `dagsorden/{id}` gives the full per-meeting detail.
+
+## Optional auth header
+
+If a future capture turns up an `Authorization` header that should not be
+committed, set it in `HKR_API_KEY` and the CLI will pass it through
+`HttpClient(extra_headers={"Authorization": ...})`.
