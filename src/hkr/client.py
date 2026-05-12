@@ -9,10 +9,18 @@ from typing import Any
 import httpx
 from tenacity import (
     retry,
-    retry_if_exception_type,
+    retry_if_exception,
     stop_after_attempt,
     wait_exponential,
 )
+
+
+def _is_retryable(exc: BaseException) -> bool:
+    if isinstance(exc, httpx.TransportError):
+        return True
+    if isinstance(exc, httpx.HTTPStatusError):
+        return exc.response.status_code >= 500
+    return False
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +39,15 @@ class HttpClient:
         headers = {"User-Agent": user_agent, "Accept": "application/json"}
         if extra_headers:
             headers.update(extra_headers)
-        self._client = httpx.Client(http2=True, timeout=30.0, headers=headers)
+        # follow_redirects=True is required: the API issues a 302 to
+        # /Home/AnonymousAuthentication?callback=<original> on the first hit,
+        # which sets a .AspNet.Cookies session cookie and redirects back.
+        # httpx.Client persists cookies across the redirect chain automatically.
+        self._client = httpx.Client(
+            timeout=30.0,
+            headers=headers,
+            follow_redirects=True,
+        )
         self._min_interval = 1.0 / rps if rps > 0 else 0.0
         self._last_request_at = 0.0
         self._save_raw_dir = save_raw_dir
@@ -46,7 +62,7 @@ class HttpClient:
         reraise=True,
         stop=stop_after_attempt(5),
         wait=wait_exponential(multiplier=1, min=1, max=30),
-        retry=retry_if_exception_type((httpx.TransportError, httpx.HTTPStatusError)),
+        retry=retry_if_exception(_is_retryable),
     )
     def get_json(self, url: str, *, label: str | None = None) -> Any:
         self._throttle()
